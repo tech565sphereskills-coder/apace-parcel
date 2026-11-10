@@ -1,0 +1,349 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  RIDER
+  ADMIN
+}
+
+enum OrderStatus {
+  SEARCHING
+  ASSIGNED
+  PICKED_UP
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+
+enum ServiceType {
+  BIKE
+  CAR
+  VAN
+  INTERSTATE
+}
+
+enum TransactionType {
+  TOPUP
+  DISPATCH
+  WITHDRAWAL
+  TIP
+  ESCROW_HOLD
+  ESCROW_RELEASE
+  RIDER_PAYOUT
+  REFUND
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum DisputeStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED_REFUND
+  RESOLVED_RELEASE
+}
+
+enum OtpPurpose {
+  VERIFY_PHONE
+  RESET_PASSWORD
+  RESET_PIN
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+enum StopStatus {
+  PENDING
+  ARRIVED
+  DELIVERED
+}
+
+model User {
+  id                 String           @id @default(uuid())
+  fullName           String
+  email              String?          @unique
+  phone              String           @unique
+  passwordHash       String
+  role               Role             @default(CUSTOMER)
+  kycTier            Int              @default(1)
+  ninNumber          String?
+  isNinVerified      Boolean          @default(false)
+  bvnNumber          String?
+  isBvnVerified      Boolean          @default(false)
+  isLivenessVerified Boolean          @default(false)
+  isPhoneVerified    Boolean          @default(false)
+  isDeleted          Boolean          @default(false)
+  deletedAt          DateTime?
+  transactionPinHash String?
+  pinAttempts        Int              @default(0)
+  pinLockedUntil     DateTime?
+  notifyWhatsapp     Boolean          @default(true)
+  notifySms          Boolean          @default(true)
+  notifyPush         Boolean          @default(true)
+  authProvider       String?
+  authProviderId     String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  wallet             Wallet?
+  sentOrders         DeliveryOrder[]  @relation("SenderOrders")
+  assignedOrders     DeliveryOrder[]  @relation("RiderOrders")
+  savedAddresses     SavedAddress[]
+  riderProfile       RiderProfile?
+  sessions           RefreshSession[]
+  auditLogs          AuditLog[]
+  deviceTokens       DeviceToken[]
+  disputes           Dispute[]
+  chatMessages       ChatMessage[]
+  dispatchOffers     DispatchOffer[]
+}
+
+model RefreshSession {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  deviceId   String?
+  userAgent  String?
+  ipAddress  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+model OtpVerification {
+  id         String     @id @default(uuid())
+  phone      String
+  purpose    OtpPurpose
+  codeHash   String
+  attempts   Int        @default(0)
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  createdAt  DateTime   @default(now())
+}
+
+model Wallet {
+  id                   String              @id @default(uuid())
+  userId               String              @unique
+  user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance              Float               @default(0.0)
+  currency             String              @default("NGN")
+  virtualBankName      String              @default("Moniepoint MFB")
+  virtualAccountNumber String?
+  virtualAccountName   String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  transactions         WalletTransaction[]
+}
+
+model WalletTransaction {
+  id        String            @id @default(uuid())
+  walletId  String
+  wallet    Wallet            @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  amount    Float
+  isCredit  Boolean
+  title     String
+  subtitle  String
+  reference String            @unique
+  category  TransactionType
+  status    TransactionStatus @default(SUCCESS)
+  createdAt DateTime          @default(now())
+}
+
+model DeliveryOrder {
+  id                  String        @id @default(uuid())
+  orderNumber         String        @unique
+  senderId            String
+  sender              User          @relation("SenderOrders", fields: [senderId], references: [id])
+  riderId             String?
+  rider               User?         @relation("RiderOrders", fields: [riderId], references: [id])
+  serviceType         ServiceType   @default(BIKE)
+  status              OrderStatus   @default(SEARCHING)
+  pickupAddress       String
+  pickupLandmark      String?
+  pickupContactName   String
+  pickupContactPhone  String
+  pickupLat           Float?
+  pickupLng           Float?
+  dropoffAddress      String
+  dropoffLandmark     String?
+  dropoffContactName  String
+  dropoffContactPhone String
+  dropoffLat          Float?
+  dropoffLng          Float?
+  distanceKm          Float         @default(14.5)
+  packageCategory     String?
+  price               Float
+  paymentMethod       String        @default("WALLET")
+  isPaid              Boolean       @default(true)
+  handoverOtp         String
+  tipAmount           Float         @default(0.0)
+  stopsCount          Int           @default(1)
+  scheduledTime       String?
+  hasProofOfDelivery  Boolean       @default(false)
+  recipientSignature  String?
+  proofPhotoUrl       String?
+  isEscrow            Boolean       @default(false)
+  escrowAmount        Float         @default(0.0)
+  escrowStatus        String?
+  escrowReleaseCode   String?
+  waybillNumber       String?       @unique
+  rating              Int?
+  feedback            String?
+  deliveredAt         DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  chatMessages        ChatMessage[]
+  disputes            Dispute[]
+  dispatchOffers      DispatchOffer[]
+  stops               OrderStop[]
+  geofenceStatus      String?
+  currentStopIndex    Int           @default(1)
+}
+
+model OrderStop {
+  id             String        @id @default(uuid())
+  orderId        String
+  order          DeliveryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sequence       Int
+  subWaybillCode String        @unique
+  address        String
+  landmark       String?
+  contactName    String
+  contactPhone   String
+  lat            Float?
+  lng            Float?
+  handoverOtp    String
+  status         StopStatus    @default(PENDING)
+  proofPhotoUrl  String?
+  deliveredAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model DispatchOffer {
+  id            String        @id @default(uuid())
+  orderId       String
+  order         DeliveryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  riderId       String
+  rider         User          @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  attemptNumber Int           @default(1)
+  payoutAmount  Float
+  status        OfferStatus   @default(PENDING)
+  expiresAt     DateTime
+  respondedAt   DateTime?
+  createdAt     DateTime      @default(now())
+}
+
+model ChatMessage {
+  id         String        @id @default(uuid())
+  orderId    String
+  order      DeliveryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  senderId   String
+  sender     User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderRole Role
+  message    String
+  createdAt  DateTime      @default(now())
+}
+
+model Dispute {
+  id              String        @id @default(uuid())
+  orderId         String
+  order           DeliveryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reporterId      String
+  reporter        User          @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  reason          String
+  description     String
+  evidenceUrl     String?
+  status          DisputeStatus @default(OPEN)
+  resolutionNotes String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String
+  resource   String
+  resourceId String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  platform  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SavedAddress {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String
+  street       String
+  landmark     String?
+  contactName  String
+  contactPhone String
+  tag          String   @default("home")
+  createdAt    DateTime @default(now())
+}
+
+model RiderProfile {
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicleType     String    @default("Motorcycle")
+  vehicleModel    String?
+  plateNumber     String
+  licenseNumber   String?
+  licensePhotoUrl String?
+  guarantorName   String?
+  guarantorPhone  String?
+  approvalStatus  String    @default("APPROVED")
+  isOnline        Boolean   @default(false)
+  isVerified      Boolean   @default(false)
+  currentLat      Float?
+  currentLng      Float?
+  lastLocationAt  DateTime?
+  lastSpeedKmh    Float     @default(0.0)
+  spoofFlags      Int       @default(0)
+  totalTrips      Int       @default(0)
+  rating          Float     @default(5.0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model NotificationLog {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  channel   String   @default("PUSH")
+  provider  String   @default("fcm_sandbox")
+  metadata  Json?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
